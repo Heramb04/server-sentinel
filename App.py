@@ -76,15 +76,21 @@ def predict_logic(mode, s_cpu, s_cpu_avg, s_ram, s_temp, s_change):
             'cpu_temp_change': float(change)
         }])
         
-        # Predict
-        pred = model.predict(input_df)[0]
-        prob = model.predict_proba(input_df)[0][1]
+        # Predict Probabilities directly
+        # index 0 = prob of Normal, index 1 = prob of Critical
+        prob_val = model.predict_proba(input_df)[0][1]
         
-        status_msg = "CRITICAL FAILURE IMMINENT" if pred == 1 else "SYSTEM NORMAL"
-        prob_str = f"{prob * 100:.1f}%"
+        # LOGIC UPDATE: Use tiers instead of simple 50% threshold
+        if prob_val >= 0.80:
+            status_msg = "CRITICAL FAILURE IMMINENT"
+        elif prob_val >= 0.50:
+            status_msg = "WARNING: ELEVATED RISK"
+        else:
+            status_msg = "SYSTEM NORMAL"
+            
+        prob_str = f"{prob_val * 100:.1f}%"
 
     # 3. Return everything 
-    # We return the status/prob, PLUS the values to update the Live Display numbers
     return status_msg, prob_str, cpu, cpu_avg, ram, temp, change
 
 # --- 4. The Gradio Blocks UI ---
@@ -114,7 +120,6 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
     with gr.Group(visible=False) as live_panel:
         gr.Markdown("### 📡 Live Sensor Readings (Localhost)")
         with gr.Row():
-            # These are Number boxes, not sliders, so they look like "readings"
             l_cpu = gr.Number(label="Live CPU Load", precision=1)
             l_cpu_avg = gr.Number(label="Live Sustained CPU", precision=1)
             l_ram = gr.Number(label="Live RAM", precision=1)
@@ -131,11 +136,8 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
     btn = gr.Button("Analyze System Status", variant="primary")
 
     # --- EVENTS ---
-    
-    # 1. When Mode changes, hide/show panels
     mode_switch.change(fn=toggle_ui_mode, inputs=mode_switch, outputs=[sim_panel, live_panel])
 
-    # 2. When Button clicked, run prediction AND update Live Panel displays
     btn.click(
         fn=predict_logic, 
         inputs=[mode_switch, s_cpu, s_cpu_avg, s_ram, s_temp, s_change],
