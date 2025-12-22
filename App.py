@@ -12,116 +12,134 @@ model = None
 if os.path.exists(MODEL_FILE):
     try:
         model = joblib.load(MODEL_FILE)
-        print(f"Model loaded with joblib.")
     except Exception:
         import pickle
         with open(MODEL_FILE, 'rb') as f:
             model = pickle.load(f)
-        print(f"Model loaded with pickle.")
 
 # --- 2. Helper: Get Live System Data ---
 def get_live_metrics():
-    # CPU
     cpu = psutil.cpu_percent(interval=0.1)
-    
-    # RAM
     ram = psutil.virtual_memory().percent
     
-    # TEMP (Try multiple common sensors for Linux/Bazzite)
-    temp = 50.0 # Fallback
+    # Sensor fallback logic
+    temp = 50.0 
     try:
         temps = psutil.sensors_temperatures()
-        if 'k10temp' in temps: # AMD Ryzen (Likely for your Victus)
-            temp = temps['k10temp'][0].current
-        elif 'amdgpu' in temps: # AMD GPU fallback
-            temp = temps['amdgpu'][0].current
-        elif 'coretemp' in temps: # Intel fallback
-            temp = temps['coretemp'][0].current
-        elif 'acpitz' in temps: # Generic ACPI fallback
-            temp = temps['acpitz'][0].current
+        if 'k10temp' in temps: temp = temps['k10temp'][0].current
+        elif 'amdgpu' in temps: temp = temps['amdgpu'][0].current
+        elif 'coretemp' in temps: temp = temps['coretemp'][0].current
+        elif 'acpitz' in temps: temp = temps['acpitz'][0].current
     except:
-        pass # Keep fallback if sensors fail/permission denied
+        pass
 
-    # Rolling Averages (Simulated for live demo)
-    # Since we can't easily store state in a simple function call without a database,
-    # we'll assume "Sustained" is roughly equal to "Current" for the live snapshot.
-    cpu_avg = cpu 
-    
-    return cpu, cpu_avg, ram, temp, 0.0 # Change rate 0 for snapshot
+    return cpu, cpu, ram, temp, 0.0 # cpu_avg = cpu for snapshot
 
-# --- 3. The Prediction Function ---
-def predict(mode, s_cpu, s_cpu_avg, s_ram, s_temp, s_change):
-    # Logic: If Live Mode is ON, overwrite inputs with real data
+# --- 3. UI Logic Functions ---
+
+def toggle_ui_mode(mode):
+    """
+    Hides/Shows panels based on the selected mode.
+    """
+    if mode == "Live System Monitor":
+        # Hide Sim Panel, Show Live Panel
+        return gr.update(visible=False), gr.update(visible=True)
+    else:
+        # Show Sim Panel, Hide Live Panel
+        return gr.update(visible=True), gr.update(visible=False)
+
+def predict_logic(mode, s_cpu, s_cpu_avg, s_ram, s_temp, s_change):
+    """
+    Performs prediction and returns values to populate the correct panel.
+    """
+    # 1. Get Data Source
     if mode == "Live System Monitor":
         cpu, cpu_avg, ram, temp, change = get_live_metrics()
     else:
-        # Use slider values directly
         cpu, cpu_avg, ram, temp, change = s_cpu, s_cpu_avg, s_ram, s_temp, s_change
 
-    if model is None:
-        return "Model Missing", "0%", cpu, cpu_avg, ram, temp, change
-
-    # Prepare Data exactly as trained
-    input_df = pd.DataFrame([{
-        'cpu_percent': float(cpu),
-        'ram_percent': float(ram),
-        'cpu_temp': float(temp),
-        'gpu_temp': float(temp) - 15.0, # Heuristic
-        'net_recv_bytes': 1024.0,
-        'disk_write_bytes': 0.0,
-        'cpu_rolling_avg': float(cpu_avg),
-        'ram_rolling_avg': float(ram),
-        'cpu_temp_change': float(change)
-    }])
-
-    # Predict
-    pred_class = model.predict(input_df)[0]
-    pred_prob = model.predict_proba(input_df)[0][1]
+    # 2. Check Model
+    status_msg = "Model Missing"
+    prob_str = "0%"
     
-    status = "CRITICAL FAILURE IMMINENT" if pred_class == 1 else "SYSTEM NORMAL"
-    probability = f"{pred_prob * 100:.1f}%"
-    
-    # Return Status, Prob, AND the updated slider values (to animate them)
-    return status, probability, cpu, cpu_avg, ram, temp, change
+    if model:
+        # Prepare Data
+        input_df = pd.DataFrame([{
+            'cpu_percent': float(cpu),
+            'ram_percent': float(ram),
+            'cpu_temp': float(temp),
+            'gpu_temp': float(temp) - 15.0,
+            'net_recv_bytes': 1024.0,
+            'disk_write_bytes': 0.0,
+            'cpu_rolling_avg': float(cpu_avg),
+            'ram_rolling_avg': float(ram),
+            'cpu_temp_change': float(change)
+        }])
+        
+        # Predict
+        pred = model.predict(input_df)[0]
+        prob = model.predict_proba(input_df)[0][1]
+        
+        status_msg = "CRITICAL FAILURE IMMINENT" if pred == 1 else "SYSTEM NORMAL"
+        prob_str = f"{prob * 100:.1f}%"
 
-# --- 4. The Gradio UI Interface ---
+    # 3. Return everything 
+    # We return the status/prob, PLUS the values to update the Live Display numbers
+    return status_msg, prob_str, cpu, cpu_avg, ram, temp, change
+
+# --- 4. The Gradio Blocks UI ---
 with gr.Blocks(theme=gr.themes.Soft()) as demo:
-    gr.Markdown("# 🖥️ Server Health Sentinel AI (Hybrid Edition)")
-    gr.Markdown("### AIOps Failure Prediction System (PoC)")
+    gr.Markdown("# 🖥️ Server Health Sentinel (Hybrid Edition)")
     
-    # The Mode Toggle
-    mode_switch = gr.Radio(["Simulation Mode", "Live System Monitor"], 
-                           value="Simulation Mode", 
-                           label="Operation Mode")
+    # Top Control: Mode Switch
+    mode_switch = gr.Radio(
+        ["Simulation Mode", "Live System Monitor"], 
+        value="Simulation Mode", 
+        label="Operation Mode",
+        info="Select 'Live' to read local hardware sensors."
+    )
     
-    with gr.Row():
-        with gr.Column():
-            gr.Markdown("### 🎛️ Telemetry Inputs")
-            
+    # --- PANEL A: SIMULATION (Sliders) ---
+    with gr.Group(visible=True) as sim_panel:
+        gr.Markdown("### 🎛️ Manual Simulation Controls")
+        with gr.Row():
             s_cpu = gr.Slider(0, 100, value=10, label="Current CPU Load (%)")
-            s_cpu_avg = gr.Slider(0, 100, value=10, label="Sustained CPU Load (Last 1 min) (%)")
+            s_cpu_avg = gr.Slider(0, 100, value=10, label="Sustained CPU Load (%)")
             s_ram = gr.Slider(0, 100, value=30, label="RAM Usage (%)")
+        with gr.Row():
             s_temp = gr.Slider(30, 100, value=50, label="Current Temperature (°C)")
-            s_change = gr.Slider(-2, 5, value=0, step=0.5, label="Temp Change Rate (°C/sec)")
-            
-            btn = gr.Button("Run Analysis", variant="primary")
+            s_change = gr.Slider(-2, 5, value=0, step=0.5, label="Temp Change Rate")
 
-        with gr.Column():
-            gr.Markdown("### 🧠 AI Diagnosis")
-            out_status = gr.Textbox(label="Status")
-            out_prob = gr.Textbox(label="Failure Probability")
-            
-            gr.Markdown("""
-            **Architecture:** Random Forest Classifier
-            **Trained on:** 10,000+ Real-world Linux Telemetry Points
-            **Live Mode:** Uses `psutil` to fetch real-time hardware stats.
-            """)
+    # --- PANEL B: LIVE MONITOR (Read-Only Displays) ---
+    with gr.Group(visible=False) as live_panel:
+        gr.Markdown("### 📡 Live Sensor Readings (Localhost)")
+        with gr.Row():
+            # These are Number boxes, not sliders, so they look like "readings"
+            l_cpu = gr.Number(label="Live CPU Load", precision=1)
+            l_cpu_avg = gr.Number(label="Live Sustained CPU", precision=1)
+            l_ram = gr.Number(label="Live RAM", precision=1)
+        with gr.Row():
+            l_temp = gr.Number(label="Live Temp (°C)", precision=1)
+            l_change = gr.Number(label="Temp Change", value=0, precision=1)
 
-    # Connect the button
-    # Note: We output back to the sliders (s_cpu, etc.) to update them visually in Live Mode!
-    btn.click(fn=predict, 
-              inputs=[mode_switch, s_cpu, s_cpu_avg, s_ram, s_temp, s_change], 
-              outputs=[out_status, out_prob, s_cpu, s_cpu_avg, s_ram, s_temp, s_change])
+    # --- OUTPUTS ---
+    gr.Markdown("### 🧠 AI Diagnosis")
+    with gr.Row():
+        out_status = gr.Textbox(label="Status")
+        out_prob = gr.Textbox(label="Failure Probability")
 
-# Launch
+    btn = gr.Button("Analyze System Status", variant="primary")
+
+    # --- EVENTS ---
+    
+    # 1. When Mode changes, hide/show panels
+    mode_switch.change(fn=toggle_ui_mode, inputs=mode_switch, outputs=[sim_panel, live_panel])
+
+    # 2. When Button clicked, run prediction AND update Live Panel displays
+    btn.click(
+        fn=predict_logic, 
+        inputs=[mode_switch, s_cpu, s_cpu_avg, s_ram, s_temp, s_change],
+        outputs=[out_status, out_prob, l_cpu, l_cpu_avg, l_ram, l_temp, l_change]
+    )
+
 demo.launch()
