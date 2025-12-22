@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Server Health Sentinel</title>
+    <style>
+        :root { --bg: #1a1a2e; --card: #16213e; --text: #e94560; --safe: #2ecc71; --danger: #e74c3c; }
+        body { font-family: sans-serif; background: var(--bg); color: #fff; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        .container { display: flex; gap: 20px; max-width: 900px; width: 100%; flex-wrap: wrap; }
+        .panel { background: var(--card); padding: 25px; border-radius: 15px; flex: 1; min-width: 300px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+        .slider-group { margin-bottom: 15px; }
+        label { display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 5px; }
+        input[type="range"] { width: 100%; accent-color: var(--text); }
+        .val { color: var(--text); }
+        #status-box { text-align: center; padding: 30px; border-radius: 10px; margin-top: 20px; transition: all 0.3s; }
+        .normal { background: var(--safe); }
+        .critical { background: var(--danger); animation: pulse 1s infinite; }
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.02); } 100% { transform: scale(1); } }
+    </style>
+</head>
+<body>
+    <h1 style="color: var(--text)">Server Failure predictor</h1>
+    <div class="container">
+        <div class="panel">
+            <h2>Simulation Controls</h2>
+
+            <div class="slider-group">
+                <label>Current CPU Load: <span id="v-cpu" class="val">10%</span></label>
+                <input type="range" id="cpu" min="0" max="100" value="10" oninput="update()">
+            </div>
+            <div class="slider-group">
+                <label>Sustained CPU (Last 1 min): <span id="v-cpu-avg" class="val">10%</span></label>
+                <input type="range" id="cpu_avg" min="0" max="100" value="10" oninput="update()">
+            </div>
+
+            <!-- NEW RAM SLIDER -->
+            <div class="slider-group">
+                <label>RAM Usage: <span id="v-ram" class="val">30%</span></label>
+                <input type="range" id="ram" min="0" max="100" value="30" oninput="update()">
+            </div>
+
+            <hr style="border-color: #333">
+            <div class="slider-group">
+                <label>Current Temp: <span id="v-temp" class="val">50°C</span></label>
+                <input type="range" id="temp" min="30" max="100" value="50" oninput="update()">
+            </div>
+             <div class="slider-group">
+                <label>Is it getting hotter?: <span id="v-change" class="val">Stable (+0°C/s)</span></label>
+                <input type="range" id="change" min="-2" max="5" step="0.5" value="0" oninput="update()">
+            </div>
+        </div>
+
+        <div class="panel">
+            <h2>AI Prediction</h2>
+            <div id="status-box" class="normal">
+                <h1 id="status-text" style="font-size: 3em; margin: 0;">NORMAL</h1>
+                <p>Probability of Failure: <strong id="prob-text" style="font-size: 1.5em;">0%</strong></p>
+            </div>
+            <p style="margin-top: 30px; opacity: 0.7;">
+                <strong>How it works:</strong><br>
+                This dashboard sends your simulated data to a
+                Random Forest model trained on real-world data.
+                It predicts if the server will overheat and fail in the next 5 minutes based on current load AND previous trends.
+            </p>
+        </div>
+    </div>
+
+    <script>
+        function update() {
+            // Update labels
+            document.getElementById('v-cpu').innerText = document.getElementById('cpu').value + '%';
+            document.getElementById('v-cpu-avg').innerText = document.getElementById('cpu_avg').value + '%';
+            document.getElementById('v-ram').innerText = document.getElementById('ram').value + '%'; // New label
+            document.getElementById('v-temp').innerText = document.getElementById('temp').value + '°C';
+
+            let changeVal = document.getElementById('change').value;
+            let changeText = "Stable (+0°C/s)";
+            if (changeVal > 0) changeText = "Heating up! (+" + changeVal + "°C/s)";
+            if (changeVal < 0) changeText = "Cooling down (" + changeVal + "°C/s)";
+            document.getElementById('v-change').innerText = changeText;
+
+            // Send to API
+            fetch('/predict', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    cpu_percent: document.getElementById('cpu').value,
+                    cpu_rolling_avg: document.getElementById('cpu_avg').value,
+                    ram_percent: document.getElementById('ram').value, // New input
+                    cpu_temp: document.getElementById('temp').value,
+                    cpu_temp_change: document.getElementById('change').value
+                })
+            })
+            .then(r => r.json())
+            .then(d => {
+                document.getElementById('status-text').innerText = d.status;
+                document.getElementById('prob-text').innerText = d.probability + '%';
+                document.getElementById('status-box').className = (d.status === 'CRITICAL') ? 'critical' : 'normal';
+            })
+            .catch(e => console.error(e));
+        }
+        update();
+    </script>
+</body>
+</html>
