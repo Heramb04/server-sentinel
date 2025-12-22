@@ -19,7 +19,7 @@ if os.path.exists(MODEL_FILE):
 
 # --- 2. Helper: Get Live System Data ---
 def get_live_metrics():
-    cpu = psutil.cpu_percent(interval=0.1)
+    cpu = psutil.cpu_percent(interval=None) # Non-blocking for timer
     ram = psutil.virtual_memory().percent
     
     # Sensor fallback logic
@@ -39,14 +39,22 @@ def get_live_metrics():
 
 def toggle_ui_mode(mode):
     """
-    Hides/Shows panels based on the selected mode.
+    Hides/Shows panels AND enables/disables the timer based on mode.
     """
     if mode == "Live System Monitor":
-        # Hide Sim Panel, Show Live Panel
-        return gr.update(visible=False), gr.update(visible=True)
+        # Show Live Panel, Hide Sim Panel, TURN ON TIMER (active=True)
+        return {
+            sim_panel: gr.update(visible=False), 
+            live_panel: gr.update(visible=True),
+            timer: gr.update(active=True)
+        }
     else:
-        # Show Sim Panel, Hide Live Panel
-        return gr.update(visible=True), gr.update(visible=False)
+        # Show Sim Panel, Hide Live Panel, TURN OFF TIMER (active=False)
+        return {
+            sim_panel: gr.update(visible=True), 
+            live_panel: gr.update(visible=False),
+            timer: gr.update(active=False)
+        }
 
 def predict_logic(mode, s_cpu, s_cpu_avg, s_ram, s_temp, s_change):
     """
@@ -77,18 +85,20 @@ def predict_logic(mode, s_cpu, s_cpu_avg, s_ram, s_temp, s_change):
         }])
         
         # Predict Probabilities directly
-        # index 0 = prob of Normal, index 1 = prob of Critical
-        prob_val = model.predict_proba(input_df)[0][1]
-        
-        # LOGIC UPDATE: Use tiers instead of simple 50% threshold
-        if prob_val >= 0.80:
-            status_msg = "CRITICAL FAILURE IMMINENT"
-        elif prob_val >= 0.50:
-            status_msg = "WARNING: ELEVATED RISK"
-        else:
-            status_msg = "SYSTEM NORMAL"
+        try:
+            prob_val = model.predict_proba(input_df)[0][1]
             
-        prob_str = f"{prob_val * 100:.1f}%"
+            # LOGIC UPDATE: Use tiers instead of simple 50% threshold
+            if prob_val >= 0.80:
+                status_msg = "CRITICAL FAILURE IMMINENT"
+            elif prob_val >= 0.50:
+                status_msg = "WARNING: ELEVATED RISK"
+            else:
+                status_msg = "SYSTEM NORMAL"
+                
+            prob_str = f"{prob_val * 100:.1f}%"
+        except Exception as e:
+            status_msg = f"Error: {str(e)}"
 
     # 3. Return everything 
     return status_msg, prob_str, cpu, cpu_avg, ram, temp, change
@@ -105,9 +115,12 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
         info="Select 'Live' to read local hardware sensors."
     )
     
+    # Timer component (Initially inactive)
+    timer = gr.Timer(2.0, active=False)
+    
     # --- PANEL A: SIMULATION (Sliders) ---
     with gr.Group(visible=True) as sim_panel:
-        gr.Markdown("### Manual Simulation Controls")
+        gr.Markdown("### 🎛️ Manual Simulation Controls")
         with gr.Row():
             s_cpu = gr.Slider(0, 100, value=10, label="Current CPU Load (%)")
             s_cpu_avg = gr.Slider(0, 100, value=10, label="Sustained CPU Load (%)")
@@ -118,7 +131,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
 
     # --- PANEL B: LIVE MONITOR (Read-Only Displays) ---
     with gr.Group(visible=False) as live_panel:
-        gr.Markdown("### Live Sensor Readings (Localhost)")
+        gr.Markdown("### 📡 Live Sensor Readings (Localhost)")
         with gr.Row():
             l_cpu = gr.Number(label="Live CPU Load", precision=1)
             l_cpu_avg = gr.Number(label="Live Sustained CPU", precision=1)
@@ -128,7 +141,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
             l_change = gr.Number(label="Temp Change", value=0, precision=1)
 
     # --- OUTPUTS ---
-    gr.Markdown("### AI Diagnosis")
+    gr.Markdown("### 🧠 AI Diagnosis")
     with gr.Row():
         out_status = gr.Textbox(label="Status")
         out_prob = gr.Textbox(label="Failure Probability")
@@ -136,10 +149,25 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
     btn = gr.Button("Analyze System Status", variant="primary")
 
     # --- EVENTS ---
-    mode_switch.change(fn=toggle_ui_mode, inputs=mode_switch, outputs=[sim_panel, live_panel])
+    
+    # 1. Mode Switch Logic: Toggles panels AND Timer
+    mode_switch.change(
+        fn=toggle_ui_mode, 
+        inputs=mode_switch, 
+        outputs=[sim_panel, live_panel, timer]
+    )
 
+    # 2. Manual Button Click
     btn.click(
         fn=predict_logic, 
+        inputs=[mode_switch, s_cpu, s_cpu_avg, s_ram, s_temp, s_change],
+        outputs=[out_status, out_prob, l_cpu, l_cpu_avg, l_ram, l_temp, l_change]
+    )
+    
+    # 3. Timer Tick (Auto-Update)
+    # Triggers the exact same logic as the button, automatically
+    timer.tick(
+        fn=predict_logic,
         inputs=[mode_switch, s_cpu, s_cpu_avg, s_ram, s_temp, s_change],
         outputs=[out_status, out_prob, l_cpu, l_cpu_avg, l_ram, l_temp, l_change]
     )
