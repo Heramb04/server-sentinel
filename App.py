@@ -107,7 +107,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
     
     # --- PANEL A: SIMULATION (Sliders) ---
     with gr.Group(visible=True) as sim_panel:
-        gr.Markdown("### 🎛️ Manual Simulation Controls")
+        gr.Markdown("### Manual Simulation Controls")
         with gr.Row():
             s_cpu = gr.Slider(0, 100, value=10, label="Current CPU Load (%)")
             s_cpu_avg = gr.Slider(0, 100, value=10, label="Sustained CPU Load (%)")
@@ -118,7 +118,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
 
     # --- PANEL B: LIVE MONITOR (Read-Only Displays) ---
     with gr.Group(visible=False) as live_panel:
-        gr.Markdown("### 📡 Live Sensor Readings (Localhost)")
+        gr.Markdown("### Live Sensor Readings (Localhost)")
         with gr.Row():
             l_cpu = gr.Number(label="Live CPU Load", precision=1)
             l_cpu_avg = gr.Number(label="Live Sustained CPU", precision=1)
@@ -128,7 +128,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
             l_change = gr.Number(label="Temp Change", value=0, precision=1)
 
     # --- OUTPUTS ---
-    gr.Markdown("### 🧠 AI Diagnosis")
+    gr.Markdown("### AI Diagnosis")
     with gr.Row():
         out_status = gr.Textbox(label="Status")
         out_prob = gr.Textbox(label="Failure Probability")
