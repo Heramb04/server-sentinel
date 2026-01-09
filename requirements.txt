@@ -1,6 +1,8 @@
-flask
+<<<<<<< HEAD
+gradio
+psutil
+scikit-learn
 pandas
 numpy
-scikit-learn
-gunicorn
-gradio
+joblib
+>>>>>>> 1b2ade273735e28c8fcc8e13fde503536ac9d15f
