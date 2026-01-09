@@ -1,8 +1,6 @@
-<<<<<<< HEAD
 gradio
 psutil
 scikit-learn
 pandas
 numpy
 joblib
->>>>>>> 1b2ade273735e28c8fcc8e13fde503536ac9d15f
