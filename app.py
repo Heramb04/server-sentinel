@@ -245,4 +245,4 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
         outputs=[out_status, out_prob, l_cpu, l_cpu_avg, l_ram, l_temp, l_change]
     )
 
-demo.launch()
+demo.launch(server_name="0.0.0.0", server_port=8000)
